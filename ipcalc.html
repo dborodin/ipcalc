@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="author" content="Dima Borodin">
+	<title>IP calculator</title>
+	<style>
+		body, input[type="text"] { text-align: center; font-family: monospace; font-size: 120%; }
+		#result { margin-top: 20px; }
+		table { margin: 0 auto; border-collapse: collapse; }
+		td, th { text-align: left; padding: 10px; border: 1px solid black; }
+	</style>
+</head>
+<body>
+	<h1>IP calculator v0.1</h1>
+	<h2>Dima Borodin</h2>
+	<div>
+		<label for="ip">IP </label><input id="ip" type="text" size="15" value="192.168.0.1" />
+		<label for="nm">Netmask </label><input id="nm" type="text" size="15" value="255.255.255.0" />
+		<button id="go">Go</button>
+	</div>
+	<div id="result"></div>
+	<script>
+		function m_Error(text) {
+			return '<b style="color:red">Error: ' + text + '</b>';
+		}
+
+		function m_ValidateIP(ip) {
+			return ip.toString().match(/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/);
+		}
+
+		function m_Bin2Dec(bin) {
+			return parseInt(bin, 2);
+		}
+
+		function m_Bin2IP(bin) {
+			return bin.match(/.{1,8}/g).map(function(v) { return m_Bin2Dec(v); }).join('.');
+		}
+
+		function m_Dec2Bin(dec, n) {
+			var dec = parseInt(dec);
+			return (Number.isInteger(dec) && (dec >= 0) && (n > 0)) ? dec.toString(2).padStart(n,'0') : false;
+		}
+
+		function m_IP2Bin(ip) {
+			return (m_ValidateIP(ip)) ? ip.split('.').map(function(v) { return m_Dec2Bin(v, 8); }).join('') : false;
+		}
+
+		function m_DisplayIP2Bin(ip) {
+			var ip2bin = m_IP2Bin(ip);
+			return ip2bin ? ip2bin.match(/.{1,8}/g).join('.') : false;
+		}
+
+		function m_CalcWC(nm) {
+			return (m_ValidateIP(nm)) ? nm.split('.').map(function(v) { return v = 255 - v; }).join('.') : false;
+		}
+
+		function m_CalcNW(ip, nm) {
+			var ip2bin = m_IP2Bin(ip);
+			var nm2bin = m_IP2Bin(nm);
+			if (ip2bin && nm2bin) {
+				var res = '';
+				for (var i = 0; i < 32; i++) {
+					res += (ip2bin[i] & nm2bin[i]);
+				}
+				return m_Bin2IP(res);
+			} else {
+				return false;
+			}			
+		}
+
+		function m_CalcBC(ip, nm) {
+			var nw2bin = m_IP2Bin(m_CalcNW(ip, nm));
+			var wc2bin = m_IP2Bin(m_CalcWC(nm));
+			if (nw2bin && wc2bin) {
+				var res = '';
+				for (var i = 0; i < 32; i++) {
+					res += (nw2bin[i] | wc2bin[i]);
+				}
+				return m_Bin2IP(res);
+			} else {
+				return false;
+			}	
+		}
+
+		function m_CalcHMin(ip, nm) {
+			var nw2bin = m_IP2Bin(m_CalcNW(ip, nm));
+			return m_Bin2IP(m_Dec2Bin(m_Bin2Dec(nw2bin) + 1, 32));
+		}
+
+		function m_CalcHMax(ip, nm) {
+			var bc2bin = m_IP2Bin(m_CalcBC(ip, nm));
+			return m_Bin2IP(m_Dec2Bin(m_Bin2Dec(bc2bin) - 1, 32));
+		}
+
+		function m_Calculate() {
+			var result = document.getElementById('result');
+
+			var ip = document.getElementById('ip').value;
+			if (!m_ValidateIP(ip)) {
+				result.innerHTML = m_Error('Incorrect IP format');
+				return;
+			}
+
+			var nm2, nm = document.getElementById('nm').value;
+			if (nm.indexOf('.') > -1 ) {
+				if (!m_ValidateIP(nm)) {
+					result.innerHTML = m_Error('Incorrect Netmask format');
+					return;
+				} else {
+					nm_bin = m_IP2Bin(nm);
+					last0 = nm_bin.indexOf('0');
+					last1 = nm_bin.lastIndexOf('1');
+					if ((last1 == -1) || ((last0 != -1) && (last0 < last1))) {
+						result.innerHTML = m_Error('Incorrect Netmask');
+						return;
+					} else {
+						nm2 = (nm_bin.match(/1/g) || []).length;
+					}
+				}
+			} else {
+				nm2 = parseInt(nm);
+				if (!Number.isInteger(nm2) || (nm2 > 32) || (nm2 < 1)) {
+					result.innerHTML = m_Error('Incorrect Netmask prefix'); 
+					return;
+				} else {
+					nm = m_Bin2IP(new Array(32 - nm2 + 1).join('0').padStart(32,'1'));
+				}
+			}
+
+			var wc = m_CalcWC(nm);
+			var nw = m_CalcNW(ip, nm);
+			var bc = m_CalcBC(ip, nm);
+			var hmin = m_CalcHMin(ip, nm);
+			var hmax = m_CalcHMax(ip, nm);
+			var hn = (2 ** (32 - nm2)) - 2;
+
+			result.innerHTML = '<table>\
+			<tr><th>Adress:</th><td>' + ip + '</td><td>' + m_DisplayIP2Bin(ip) + '</td></tr>\
+			<tr><th>Netmask:</th><td>' + nm + ' = ' + nm2 + '</td><td>' + m_DisplayIP2Bin(nm) + '</td></tr>\
+			<tr><th>Wildcard:</th><td>' + wc + '</td><td>' + m_DisplayIP2Bin(wc) + '</td></tr>\
+			<tr><th>Network:</th><td>' + nw + '/' + nm2 + '</td><td>' + m_DisplayIP2Bin(nw) + '</td></tr>\
+			<tr><th>HostMin:</th><td>' + hmin + '</td><td>' + m_DisplayIP2Bin(hmin) + '</td></tr>\
+			<tr><th>HostMax:</th><td>' + hmax + '</td><td>' + m_DisplayIP2Bin(hmax) + '</td></tr>\
+			<tr><th>Broadcast:</th><td>' + bc + '</td><td>' + m_DisplayIP2Bin(bc) + '</td></tr>\
+			<tr><th>Hosts:</th><td>' + hn + '</td><td></td></tr>\
+			</table>';
+		}
+		
+		ip.addEventListener('keypress', function(e) { if (e.key === 'Enter') { m_Calculate(); }});
+		nm.addEventListener('keypress', function(e) { if (e.key === 'Enter') { m_Calculate(); }});
+		go.addEventListener('click', function(e) { if (e.target) { m_Calculate(); }});
+	</script>
+</body>
+</html>
+
