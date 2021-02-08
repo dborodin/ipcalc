@@ -12,7 +12,7 @@
 	</style>
 </head>
 <body>
-	<h1>IP calculator v0.1</h1>
+	<h1>IP calculator v0.2</h1>
 	<h2>Dima Borodin</h2>
 	<div>
 		<label for="ip">IP </label><input id="ip" type="text" size="15" value="192.168.0.1" />
@@ -26,71 +26,109 @@
 		}
 
 		function m_ValidateIP(ip) {
-			return ip.toString().match(/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/);
+			return (ip.toString().match(/^(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/) !== null);
 		}
 
-		function m_Bin2Dec(bin) {
-			return parseInt(bin, 2);
+		function m_IP2Int(ip) {
+			if (m_ValidateIP(ip)) {
+				var ip2arr = ip.split('.');
+				return (parseInt(ip2arr[3]) | (parseInt(ip2arr[2]) << 8) | (parseInt(ip2arr[1]) << 16) | (parseInt(ip2arr[0]) << 24)) >>> 0;
+			}
+			return false;
 		}
 
-		function m_Bin2IP(bin) {
-			return bin.match(/.{1,8}/g).map(function(v) { return m_Bin2Dec(v); }).join('.');
+		function m_Int2IP(ipInt) {
+			if ((ipInt => 0) && (ipInt <= 4294967295)) {
+				return (ipInt >>> 24) + '.' + (ipInt >> 16 & 255) + '.' + (ipInt >> 8 & 255) + '.' + (ipInt & 255);
+			}
+			return false;
 		}
 
-		function m_Dec2Bin(dec, n) {
-			var dec = parseInt(dec);
-			return (Number.isInteger(dec) && (dec >= 0) && (n > 0)) ? dec.toString(2).padStart(n,'0') : false;
+		function m_NotInt32(ipInt) {
+			return ipInt ^ 0xffffffff;
+		}
+
+		function m_IsMaskValid(nm) {
+			var nmIntInverted = m_NotInt32(m_IP2Int(nm));
+			return ((nmIntInverted & (++nmIntInverted)) == 0);
+		}
+
+		function m_Mask2Prefix(nm) {
+			return (m_IP2Bin(nm).match(/1/g) || []).length;
+		}
+
+		function m_Prefix2Mask(n) {
+			return m_Int2IP(parseInt(new Array(32 - n + 1).join('0').padStart(32, '1'), 2));
 		}
 
 		function m_IP2Bin(ip) {
-			return (m_ValidateIP(ip)) ? ip.split('.').map(function(v) { return m_Dec2Bin(v, 8); }).join('') : false;
+			if (m_ValidateIP(ip)) {
+				return m_IP2Int(ip).toString(2).padStart(32, '0');
+			}
+			return false;
 		}
 
 		function m_DisplayIP2Bin(ip) {
-			var ip2bin = m_IP2Bin(ip);
-			return ip2bin ? ip2bin.match(/.{1,8}/g).join('.') : false;
+			return m_IP2Bin(ip).toString().match(/.{1,8}/g).join('.');
 		}
 
-		function m_CalcWC(nm) {
-			return (m_ValidateIP(nm)) ? nm.split('.').map(function(v) { return v = 255 - v; }).join('.') : false;
+		function m_CalcWildcard(nm) {
+			if (m_ValidateIP(nm)) {
+				return m_Int2IP(m_NotInt32(m_IP2Int(nm)));
+			}
+			return false;
 		}
 
-		function m_CalcNW(ip, nm) {
-			var ip2bin = m_IP2Bin(ip);
-			var nm2bin = m_IP2Bin(nm);
-			if (ip2bin && nm2bin) {
-				var res = '';
-				for (var i = 0; i < 32; i++) {
-					res += (ip2bin[i] & nm2bin[i]);
-				}
-				return m_Bin2IP(res);
+		function m_CalcNetwork(ip, nm) {
+			var ipInt = m_IP2Int(ip);
+			var nmInt = m_IP2Int(nm);
+			if ((ipInt !== false) && (nmInt !== false)) {				
+				return m_Int2IP(ipInt & nmInt);
+			}
+			return false;
+		}
+
+		function m_CalcBroadcast(ip, nm) {
+			var ipInt = m_IP2Int(ip);
+			var nmInt = m_IP2Int(nm);
+			if ((ipInt !== false) && (nmInt !== false)) {	
+				return m_Int2IP(ipInt | m_NotInt32(nmInt));
+			}
+			return false;
+		}
+
+		function m_CalcHostMin(ip, nm) {
+			var prefix = m_Mask2Prefix(nm);
+			if (prefix == 31) {
+				return m_CalcNetwork(ip, nm);
+			} else if (prefix == 32) {
+				return ip;
 			} else {
-				return false;
-			}			
+				var ipInt = m_IP2Int(m_CalcNetwork(ip, nm));
+				return m_Int2IP(++ipInt);
+			}
 		}
 
-		function m_CalcBC(ip, nm) {
-			var nw2bin = m_IP2Bin(m_CalcNW(ip, nm));
-			var wc2bin = m_IP2Bin(m_CalcWC(nm));
-			if (nw2bin && wc2bin) {
-				var res = '';
-				for (var i = 0; i < 32; i++) {
-					res += (nw2bin[i] | wc2bin[i]);
-				}
-				return m_Bin2IP(res);
+		function m_CalcHostMax(ip, nm) {
+			var prefix = m_Mask2Prefix(nm);
+			if (prefix == 31) {
+				return m_CalcBroadcast(ip, nm);
+			} else if (prefix == 32) {
+				return ip;
+			} else {			
+				var ipInt = m_IP2Int(m_CalcBroadcast(ip, nm));
+				return m_Int2IP(--ipInt);
+			}
+		}
+
+		function m_CalcHostsNumber(n) {
+			if (n == 31) {
+				return 2;
+			} else if (n == 32) {
+				return 1;
 			} else {
-				return false;
-			}	
-		}
-
-		function m_CalcHMin(ip, nm) {
-			var nw2bin = m_IP2Bin(m_CalcNW(ip, nm));
-			return m_Bin2IP(m_Dec2Bin(m_Bin2Dec(nw2bin) + 1, 32));
-		}
-
-		function m_CalcHMax(ip, nm) {
-			var bc2bin = m_IP2Bin(m_CalcBC(ip, nm));
-			return m_Bin2IP(m_Dec2Bin(m_Bin2Dec(bc2bin) - 1, 32));
+				return (2 ** (32 - n)) - 2;
+			}
 		}
 
 		function m_Calculate() {
@@ -102,44 +140,41 @@
 				return;
 			}
 
-			var nm2, nm = document.getElementById('nm').value;
-			if (nm.indexOf('.') > -1 ) {
-				if (!m_ValidateIP(nm)) {
-					result.innerHTML = m_Error('Incorrect Netmask format');
-					return;
-				} else {
-					nm_bin = m_IP2Bin(nm);
-					last0 = nm_bin.indexOf('0');
-					last1 = nm_bin.lastIndexOf('1');
-					if ((last1 == -1) || ((last0 != -1) && (last0 < last1))) {
+			var nm = document.getElementById('nm').value, nmPrefix;
+			if (nm.indexOf('.') > -1) {
+				if (m_ValidateIP(nm)) {
+					if (m_IsMaskValid(nm)) {
+						nmPrefix = m_Mask2Prefix(nm);						 
+					} else {
 						result.innerHTML = m_Error('Incorrect Netmask');
 						return;
-					} else {
-						nm2 = (nm_bin.match(/1/g) || []).length;
 					}
+				} else {
+					result.innerHTML = m_Error('Incorrect Netmask format');
+					return;
 				}
 			} else {
-				nm2 = parseInt(nm);
-				if (!Number.isInteger(nm2) || (nm2 > 32) || (nm2 < 1)) {
-					result.innerHTML = m_Error('Incorrect Netmask prefix'); 
-					return;
+				nmPrefix = parseInt(nm);				
+				if (Number.isInteger(nmPrefix) && (nmPrefix >= 0) && (nmPrefix <= 32)) {
+					nm = m_Prefix2Mask(nmPrefix);
 				} else {
-					nm = m_Bin2IP(new Array(32 - nm2 + 1).join('0').padStart(32,'1'));
+					result.innerHTML = m_Error('Incorrect Netmask prefix'); 
+					return;					
 				}
 			}
 
-			var wc = m_CalcWC(nm);
-			var nw = m_CalcNW(ip, nm);
-			var bc = m_CalcBC(ip, nm);
-			var hmin = m_CalcHMin(ip, nm);
-			var hmax = m_CalcHMax(ip, nm);
-			var hn = (2 ** (32 - nm2)) - 2;
+			var wc = m_CalcWildcard(nm);
+			var nw = m_CalcNetwork(ip, nm);
+			var bc = m_CalcBroadcast(ip, nm);
+			var hmin = m_CalcHostMin(ip, nm);
+			var hmax = m_CalcHostMax(ip, nm);
+			var hn = m_CalcHostsNumber(nmPrefix);
 
 			result.innerHTML = '<table>\
 			<tr><th>Adress:</th><td>' + ip + '</td><td>' + m_DisplayIP2Bin(ip) + '</td></tr>\
-			<tr><th>Netmask:</th><td>' + nm + ' = ' + nm2 + '</td><td>' + m_DisplayIP2Bin(nm) + '</td></tr>\
+			<tr><th>Netmask:</th><td>' + nm + ' = ' + nmPrefix + '</td><td>' + m_DisplayIP2Bin(nm) + '</td></tr>\
 			<tr><th>Wildcard:</th><td>' + wc + '</td><td>' + m_DisplayIP2Bin(wc) + '</td></tr>\
-			<tr><th>Network:</th><td>' + nw + '/' + nm2 + '</td><td>' + m_DisplayIP2Bin(nw) + '</td></tr>\
+			<tr><th>Network:</th><td>' + nw + '/' + nmPrefix + '</td><td>' + m_DisplayIP2Bin(nw) + '</td></tr>\
 			<tr><th>HostMin:</th><td>' + hmin + '</td><td>' + m_DisplayIP2Bin(hmin) + '</td></tr>\
 			<tr><th>HostMax:</th><td>' + hmax + '</td><td>' + m_DisplayIP2Bin(hmax) + '</td></tr>\
 			<tr><th>Broadcast:</th><td>' + bc + '</td><td>' + m_DisplayIP2Bin(bc) + '</td></tr>\
