@@ -4,20 +4,24 @@
 	<meta charset="utf-8">
 	<meta name="author" content="Dima Borodin">
 	<title>IP calculator</title>
-	<style>
-		body, input[type="text"] { text-align: center; font-family: monospace; font-size: 120%; }
-		#result { margin-top: 20px; }
-		table { margin: 0 auto; border-collapse: collapse; }
-		td, th { text-align: left; padding: 10px; border: 1px solid black; }
-	</style>
+	<style>body, input[type="text"] { text-align: center; font-family: monospace; font-size: 100%; } .cell { display: inline-block; max-width: 30%; vertical-align: top; padding: 10px; border: 1px solid grey; } .cell > label { display: block; } .cell > span { display: block; color: grey; margin-top: 10px; } table { margin: 0 auto; border-collapse: collapse; } td, th { text-align: left; padding: 7px; border: 1px solid black; } #result > table { margin-top: 20px; }</style>
 </head>
 <body>
-	<h1>IP calculator v0.2</h1>
+	<h1>IP calculator v0.3</h1>
 	<h2>Dima Borodin</h2>
 	<div>
-		<label for="ip">IP </label><input id="ip" type="text" size="15" value="192.168.0.1" />
-		<label for="nm">Netmask </label><input id="nm" type="text" size="15" value="255.255.255.0" />
-		<button id="go">Go</button>
+		<div class="cell">
+			<label for="ip">IP</label><input id="ip" type="text" size="15" value="" /><span>e.g. '192.168.0.1'</span>
+		</div>
+		<div class="cell">
+			<label for="nm">Netmask </label><input id="nm" type="text" size="15" value="" /><span>e.g. '255.255.255.0' or '24'</span>
+		</div>
+		<div class="cell">
+			<label for="sn">Subnets </label><input id="sn" type="text" size="15" value="" /><span>e.g. '30 20 8' or leave empty</span>
+		</div>
+		<div class="cell">
+			<button id="go">Go</button>
+		</div>
 	</div>
 	<div id="result"></div>
 	<script>
@@ -45,7 +49,7 @@
 		}
 
 		function m_NotInt32(ipInt) {
-			return ipInt ^ 0xffffffff;
+			return ~ipInt >>> 0;
 		}
 
 		function m_IsMaskValid(nm) {
@@ -82,7 +86,7 @@
 		function m_CalcNetwork(ip, nm) {
 			var ipInt = m_IP2Int(ip);
 			var nmInt = m_IP2Int(nm);
-			if ((ipInt !== false) && (nmInt !== false)) {				
+			if ((ipInt !== false) && (nmInt !== false)) {
 				return m_Int2IP(ipInt & nmInt);
 			}
 			return false;
@@ -91,7 +95,7 @@
 		function m_CalcBroadcast(ip, nm) {
 			var ipInt = m_IP2Int(ip);
 			var nmInt = m_IP2Int(nm);
-			if ((ipInt !== false) && (nmInt !== false)) {	
+			if ((ipInt !== false) && (nmInt !== false)) {
 				return m_Int2IP(ipInt | m_NotInt32(nmInt));
 			}
 			return false;
@@ -115,10 +119,32 @@
 				return m_CalcBroadcast(ip, nm);
 			} else if (prefix == 32) {
 				return ip;
-			} else {			
+			} else {
 				var ipInt = m_IP2Int(m_CalcBroadcast(ip, nm));
 				return m_Int2IP(--ipInt);
 			}
+		}
+
+		function m_PrintMain(ip, nm, prefix) {
+			var wc = m_CalcWildcard(nm);
+			return '<table>\
+				<tr><th>Adress:</th><td>' + ip + '</td><td>' + m_DisplayIP2Bin(ip) + '</td></tr>\
+				<tr><th>Netmask:</th><td>' + nm + ' = ' + prefix + '</td><td>' + m_DisplayIP2Bin(nm) + '</td></tr>\
+				<tr><th>Wildcard:</th><td>' + wc + '</td><td>' + m_DisplayIP2Bin(wc) + '</td></tr>';
+		}
+
+		function m_PrintNetwork(ip, nm, prefix) {
+			var nw = m_CalcNetwork(ip, nm);
+			var bc = m_CalcBroadcast(ip, nm);
+			var hmin = m_CalcHostMin(ip, nm);
+			var hmax = m_CalcHostMax(ip, nm);
+			var hn = m_CalcHostsNumber(prefix);
+			return '<tr><th>Network:</th><td>' + nw + '/' + prefix + '</td><td>' + m_DisplayIP2Bin(nw) + '</td></tr>\
+				<tr><th>HostMin:</th><td>' + hmin + '</td><td>' + m_DisplayIP2Bin(hmin) + '</td></tr>\
+				<tr><th>HostMax:</th><td>' + hmax + '</td><td>' + m_DisplayIP2Bin(hmax) + '</td></tr>\
+				<tr><th>Broadcast:</th><td>' + bc + '</td><td>' + m_DisplayIP2Bin(bc) + '</td></tr>\
+				<tr><th>Hosts:</th><td>' + hn + '</td><td></td></tr>\
+				</table>';
 		}
 
 		function m_CalcHostsNumber(n) {
@@ -131,20 +157,60 @@
 			}
 		}
 
+		function m_Round2PowerOf2(v) {
+			--v;
+			v |= v >> 1;
+			v |= v >> 2;
+			v |= v >> 4;
+			v |= v >> 8;
+			v |= v >> 16;
+			return ++v; 
+		};
+
+		function m_SplitNetwork(ip, nm, sizes) {
+			var neededHosts = 0;
+			var subnets = [];
+			sizes.forEach(function(v, i) {
+				subnets[i] = [];
+				subnets[i]['size'] = v;
+				subnets[i]['order'] = i;
+				subnets[i]['host'] = m_Round2PowerOf2(v + 2);
+				subnets[i]['prefix'] = (32 - Math.log(subnets[i]['host']) / Math.log(2));
+				neededHosts += subnets[i]['host'];
+			});
+			if (neededHosts > m_CalcHostsNumber(m_Mask2Prefix(nm))) {
+				return m_Error('Network is too small');
+			}
+			subnets.sort(function(a, b) { if (a['host'] === b['host']) { return 0; } else { return (a['host'] > b['host']) ? -1 : 1; } });
+			var nwInt = m_IP2Int(m_CalcNetwork(ip, nm));
+			subnets.forEach(function(v, i) {
+				subnets[i]['network'] = nwInt;
+				nwInt += v['host'];
+			});
+			subnets.sort(function(a, b) { return (a['order'] < b['order']) ? -1 : 1; });
+			var output = '';	
+			subnets.forEach(function(v, i) {
+				mask = m_Prefix2Mask(v['prefix']);
+				output += '<table>\
+					<tr><th colspan="3">' + (i + 1) + '. Requested size: ' + v['size'] + ' hosts</th></tr>\
+					<tr><th>Netmask:</th><td>' + mask + ' = ' + v['prefix'] + '</td><td>' + m_DisplayIP2Bin(mask) + '</td></tr>' + m_PrintNetwork(m_Int2IP(v['network']), mask, v['prefix']);
+			});
+			return output;
+		}
+
 		function m_Calculate() {
 			var result = document.getElementById('result');
 
-			var ip = document.getElementById('ip').value;
+			var ip = document.getElementById('ip').value.trim();
 			if (!m_ValidateIP(ip)) {
 				result.innerHTML = m_Error('Incorrect IP format');
 				return;
 			}
-
-			var nm = document.getElementById('nm').value, nmPrefix;
+			var nm = document.getElementById('nm').value.trim(), nmPrefix;
 			if (nm.indexOf('.') > -1) {
 				if (m_ValidateIP(nm)) {
 					if (m_IsMaskValid(nm)) {
-						nmPrefix = m_Mask2Prefix(nm);						 
+						nmPrefix = m_Mask2Prefix(nm);
 					} else {
 						result.innerHTML = m_Error('Incorrect Netmask');
 						return;
@@ -154,32 +220,41 @@
 					return;
 				}
 			} else {
-				nmPrefix = parseInt(nm);				
+				nmPrefix = parseInt(nm);
 				if (Number.isInteger(nmPrefix) && (nmPrefix >= 0) && (nmPrefix <= 32)) {
 					nm = m_Prefix2Mask(nmPrefix);
 				} else {
 					result.innerHTML = m_Error('Incorrect Netmask prefix'); 
-					return;					
+					return;
 				}
 			}
+			result.innerHTML = m_PrintMain(ip, nm, nmPrefix) + m_PrintNetwork(ip, nm, nmPrefix);
 
-			var wc = m_CalcWildcard(nm);
-			var nw = m_CalcNetwork(ip, nm);
-			var bc = m_CalcBroadcast(ip, nm);
-			var hmin = m_CalcHostMin(ip, nm);
-			var hmax = m_CalcHostMax(ip, nm);
-			var hn = m_CalcHostsNumber(nmPrefix);
-
-			result.innerHTML = '<table>\
-			<tr><th>Adress:</th><td>' + ip + '</td><td>' + m_DisplayIP2Bin(ip) + '</td></tr>\
-			<tr><th>Netmask:</th><td>' + nm + ' = ' + nmPrefix + '</td><td>' + m_DisplayIP2Bin(nm) + '</td></tr>\
-			<tr><th>Wildcard:</th><td>' + wc + '</td><td>' + m_DisplayIP2Bin(wc) + '</td></tr>\
-			<tr><th>Network:</th><td>' + nw + '/' + nmPrefix + '</td><td>' + m_DisplayIP2Bin(nw) + '</td></tr>\
-			<tr><th>HostMin:</th><td>' + hmin + '</td><td>' + m_DisplayIP2Bin(hmin) + '</td></tr>\
-			<tr><th>HostMax:</th><td>' + hmax + '</td><td>' + m_DisplayIP2Bin(hmax) + '</td></tr>\
-			<tr><th>Broadcast:</th><td>' + bc + '</td><td>' + m_DisplayIP2Bin(bc) + '</td></tr>\
-			<tr><th>Hosts:</th><td>' + hn + '</td><td></td></tr>\
-			</table>';
+			var sn = document.getElementById('sn').value.trim();
+			if (sn) {
+				if (sn.indexOf(' ') > -1) {
+					sn = sn.split(' ');
+					try {
+						sn.forEach(function(v, i) {
+							sn[i] = parseInt(v);
+							if (!Number.isInteger(sn[i])) {
+								throw Error();
+							}
+						});
+					} catch(e) {
+						result.innerHTML = m_Error('Incorrect number(s) of hosts');
+						return;
+					}
+				} else {
+					sn = parseInt(sn);
+					if (!Number.isInteger(sn)) {
+						result.innerHTML = m_Error('Incorrect number of hosts');
+						return;					
+					}
+					sn = [ sn ];
+				}
+				result.innerHTML += m_SplitNetwork(ip, nm, sn);
+			}
 		}
 		
 		ip.addEventListener('keypress', function(e) { if (e.key === 'Enter') { m_Calculate(); }});
